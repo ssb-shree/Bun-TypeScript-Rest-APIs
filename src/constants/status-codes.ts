@@ -15,3 +15,20 @@ export const INTERNAL_SERVER_ERROR = 500;
 export const NOT_IMPLEMENTED = 501;
 export const BAD_GATEWAY = 502;
 export const SERVICE_UNAVAILABLE = 503;
+
+export type HttpStatusCode =
+  | typeof OK
+  | typeof CREATED
+  | typeof ACCEPTED
+  | typeof NO_CONTENT
+  | typeof BAD_REQUEST
+  | typeof UNAUTHORIZED
+  | typeof FORBIDDEN
+  | typeof NOT_FOUND
+  | typeof CONFLICT
+  | typeof UNPROCESSABLE_CONTENT
+  | typeof TOO_MANY_REQUESTS
+  | typeof INTERNAL_SERVER_ERROR
+  | typeof NOT_IMPLEMENTED
+  | typeof BAD_GATEWAY
+  | typeof SERVICE_UNAVAILABLE;
