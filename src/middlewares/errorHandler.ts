@@ -1,6 +1,19 @@
-import { type ErrorRequestHandler } from "express";
+import { type ErrorRequestHandler, type Response } from "express";
 
 import logger from "../utils/logger";
+import { BAD_REQUEST, INTERNAL_SERVER_ERROR } from "../constants/status-codes";
+import { z } from "zod";
+import ApiError from "../utils/apiError";
+
+const zodErrorHandler = (res: Response, error: z.ZodError) => {
+  // error.issues object has path which is field and message is the reason why parsing failed
+  const errors = error.issues.map((err) => ({ path: err.path.join(","), message: err.message }));
+  res.status(BAD_REQUEST).json({ message: "Invalid user data", errors, success: false });
+};
+
+const apiErrorHandler = (res: Response, error: ApiError) => {
+  res.status(error.statusCode).json({ message: error.message, errorCode: error.errorCode });
+};
 
 export const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
   logger.error({
@@ -9,5 +22,14 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
     path: req.path,
     method: req.method,
   });
-  res.status(500).json({ message: "Internal Server Error", success: false });
+
+  if (err instanceof z.ZodError) {
+    return zodErrorHandler(res, err);
+  }
+
+  if (err instanceof ApiError) {
+    return apiErrorHandler(res, err);
+  }
+
+  res.status(INTERNAL_SERVER_ERROR).json({ message: "Internal Server Error", success: false });
 };
