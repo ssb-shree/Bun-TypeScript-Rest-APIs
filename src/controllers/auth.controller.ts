@@ -1,9 +1,10 @@
-import z from "zod";
-import jwt from "jsonwebtoken";
-
 import config from "config";
+import jwt from "jsonwebtoken";
+import type { CookieOptions } from "express";
+
 import asyncHandler from "../utils/asyncHandler";
 import ApiError from "../utils/apiError";
+import logger from "../utils/logger";
 
 import { User } from "../models/user.model";
 import { VerificationCode } from "../models/verification.model";
@@ -11,9 +12,11 @@ import { Session } from "../models/session.model";
 
 import { CONFLICT, CREATED, NOT_FOUND, OK, UNAUTHORIZED } from "../constants/status-codes";
 import { VerificationCodeType } from "../utils/verificationCode";
+
 import { daysFromNow } from "../utils/date";
 import { setAuthCookies } from "../utils/setCookies";
 
+import type { AuthenticatedRequest } from "../middlewares/auth.middleware";
 import { registerSchema, loginSchema } from "./auth.schema";
 
 const registerController = asyncHandler(async (req, res) => {
@@ -47,11 +50,16 @@ const registerController = asyncHandler(async (req, res) => {
 	});
 
 	// returns an express response object so we can continue the chaining
-	return setAuthCookies({ res, accessToken, refreshToken }).status(CREATED).json({ message: "User created", success: true });
+	return setAuthCookies({ res, accessToken, refreshToken })
+		.status(CREATED)
+		.json({ message: "User created", success: true });
 });
 
 const loginController = asyncHandler(async (req, res) => {
-	const { email, username, password, userAgent } = loginSchema.parse({ ...req.body, userAgent: req.headers["user-agent"] });
+	const { email, username, password, userAgent } = loginSchema.parse({
+		...req.body,
+		userAgent: req.headers["user-agent"],
+	});
 
 	// find the user by email
 	const userExist = await User.findOne({ email });
@@ -71,7 +79,29 @@ const loginController = asyncHandler(async (req, res) => {
 	});
 
 	// return user and tokens
-	setAuthCookies({ res, accessToken, refreshToken }).status(OK).json({ user: userExist, success: true, message: "Login successfull" });
+	setAuthCookies({ res, accessToken, refreshToken })
+		.status(OK)
+		.json({ user: userExist, success: true, message: "Login successfull" });
 });
 
-export { registerController, loginController };
+const logoutController = asyncHandler(async (req: AuthenticatedRequest, res) => {
+	if (!req.user) {
+		logger.error("cant access the user property on express req object");
+		throw new ApiError(UNAUTHORIZED, "Unauthorised");
+	}
+	const { userID, sessionID } = req.user;
+
+	await Session.findByIdAndDelete(sessionID);
+
+	const genOptions = (): CookieOptions => {
+		return { expires: new Date(Date.now()) };
+	};
+
+	res
+		.cookie("accessToken", null, genOptions())
+		.cookie("refreshToken", null, genOptions())
+		.status(OK)
+		.json({ success: false, message: "Logged out" });
+});
+
+export { registerController, loginController, logoutController };
