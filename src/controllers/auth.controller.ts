@@ -10,7 +10,7 @@ import { User } from "../models/user.model";
 import { VerificationCode } from "../models/verification.model";
 import { Session } from "../models/session.model";
 
-import { CONFLICT, CREATED, NOT_FOUND, OK, UNAUTHORIZED } from "../constants/status-codes";
+import { BAD_REQUEST, CONFLICT, CREATED, NOT_FOUND, OK, UNAUTHORIZED } from "../constants/status-codes";
 import { VerificationCodeType } from "../utils/verificationCode";
 
 import { daysFromNow } from "../utils/date";
@@ -93,15 +93,50 @@ const logoutController = asyncHandler(async (req: AuthenticatedRequest, res) => 
 
 	await Session.findByIdAndDelete(sessionID);
 
-	const genOptions = (): CookieOptions => {
-		return { expires: new Date(Date.now()) };
-	};
-
 	res
-		.cookie("accessToken", null, genOptions())
-		.cookie("refreshToken", null, genOptions())
+		.cookie("accessToken", null, { expires: new Date(Date.now()) })
+		.cookie("refreshToken", null, { expires: new Date(Date.now()) })
 		.status(OK)
-		.json({ success: false, message: "Logged out" });
+		.json({ success: true, message: "Logged out" });
 });
 
-export { registerController, loginController, logoutController };
+const refreshController = asyncHandler(async (req, res) => {
+	const refreshToken = req.cookies.refreshToken as string | undefined;
+
+	type refreshTokenPayload = {
+		sessionID?: string;
+	};
+
+	if (!refreshToken) throw new ApiError(UNAUTHORIZED, "No refresh token provided");
+
+	const { sessionID } = jwt.verify(refreshToken, config.get<string>("refreshSecret")) as refreshTokenPayload;
+
+	const session = await Session.findById(sessionID);
+	if (!(session && session.expiresAt.getTime() > Date.now())) throw new ApiError(UNAUTHORIZED, "Session Ended");
+
+	const user = await User.findById(session.userID).select("-password");
+	if (!user) throw new ApiError(UNAUTHORIZED, "Invalid Token");
+
+	// refresh the session if its gonna expire soon
+	const needsRefresh: boolean = session.expiresAt.getTime() - Date.now() < Date.now() + 24 * 60 * 60 * 1000;
+
+	if (!needsRefresh) throw new ApiError(BAD_REQUEST, "refresh not needed");
+
+	session.expiresAt = daysFromNow(30);
+	await session.save();
+
+	// create a token
+	const newRefreshToken = jwt.sign({ sessionID: session._id }, config.get<string>("refreshSecret"), {
+		expiresIn: "30d",
+	});
+	const accessToken = jwt.sign({ sessionID: session._id, userID: user._id }, config.get<string>("accessSecret"), {
+		expiresIn: "1h",
+	});
+
+	// return user and tokens
+	setAuthCookies({ res, accessToken, refreshToken: newRefreshToken })
+		.status(OK)
+		.json({ user, success: true, message: "Session refreshed successfull" });
+});
+
+export { registerController, loginController, logoutController, refreshController };
