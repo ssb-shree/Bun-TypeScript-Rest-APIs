@@ -22,7 +22,6 @@ const userSchema = new Schema<UserDocument>(
 		password: {
 			type: String,
 			required: true,
-			select: false,
 		},
 		userAgent: {
 			type: String,
