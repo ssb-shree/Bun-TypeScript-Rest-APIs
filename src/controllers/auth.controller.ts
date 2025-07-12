@@ -1,6 +1,5 @@
 import config from "config";
 import jwt from "jsonwebtoken";
-import type { CookieOptions } from "express";
 
 import asyncHandler from "../utils/asyncHandler";
 import ApiError from "../utils/apiError";
