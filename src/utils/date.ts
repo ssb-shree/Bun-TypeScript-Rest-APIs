@@ -5,3 +5,7 @@ export const daysFromNow = (numberOfDays: number): Date => {
 export const minsFromNow = (numberOfMins: number): Date => {
 	return new Date(Date.now() + numberOfMins * 60 * 1000);
 };
+
+export const minsAgo = (numberOfMins: number): Date => {
+	return new Date(Date.now() - numberOfMins * 60 * 1000);
+};

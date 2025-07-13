@@ -6,6 +6,7 @@ import logger from "../utils/logger";
 import { BAD_REQUEST, INTERNAL_SERVER_ERROR } from "../constants/status-codes";
 import { z } from "zod";
 import ApiError from "../utils/apiError";
+import { clearCookies } from "../utils/clearCookies";
 
 const REFRESH_PATH = "/auth/refresh";
 
@@ -28,13 +29,7 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
 	});
 
 	if (req.path == REFRESH_PATH) {
-		for (const cookieName in req.cookies) {
-			res.clearCookie(cookieName, {
-				httpOnly: true,
-				sameSite: "strict",
-				secure: config.get<string>("status") === "DEV",
-			});
-		}
+		return clearCookies(req, res);
 	}
 
 	if (err instanceof z.ZodError) {
