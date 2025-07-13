@@ -38,10 +38,12 @@ app.get(
 // router imports
 import authRouter from "./routes/auth.routes";
 import userRouter from "./routes/user.routes";
+import sessionRouter from "./routes/session.routes";
 
 //routes declaration
 app.use("/auth", authRouter);
 app.use("/user", userRouter);
+app.use("/sessions", sessionRouter);
 
 app.use(errorHandler);
 
