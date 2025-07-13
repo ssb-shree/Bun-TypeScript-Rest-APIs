@@ -29,7 +29,8 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
 	});
 
 	if (req.path == REFRESH_PATH) {
-		return clearCookies(req, res);
+		clearCookies(req, res);
+		return apiErrorHandler(res, err);
 	}
 
 	if (err instanceof z.ZodError) {
