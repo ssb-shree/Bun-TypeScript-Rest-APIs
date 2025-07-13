@@ -17,5 +17,11 @@ const registerSchema = loginSchema
 	});
 
 const verificationCodeSchema = z.string().min(6).max(24);
+const emailSchema = z.string().email().min(1).max(255);
 
-export { registerSchema, loginSchema, verificationCodeSchema };
+const forgotPasswordSchema = z.object({
+	password: z.string().min(6).max(255),
+	verificationCode: verificationCodeSchema,
+});
+
+export { registerSchema, loginSchema, verificationCodeSchema, emailSchema, forgotPasswordSchema };

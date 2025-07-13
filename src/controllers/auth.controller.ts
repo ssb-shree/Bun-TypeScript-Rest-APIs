@@ -9,14 +9,27 @@ import { User } from "../models/user.model";
 import { VerificationCode } from "../models/verification.model";
 import { Session } from "../models/session.model";
 
-import { BAD_REQUEST, CONFLICT, CREATED, NOT_FOUND, OK, UNAUTHORIZED } from "../constants/status-codes";
+import {
+	BAD_REQUEST,
+	CONFLICT,
+	CREATED,
+	INTERNAL_SERVER_ERROR,
+	NOT_FOUND,
+	OK,
+	TOO_MANY_REQUESTS,
+	UNAUTHORIZED,
+} from "../constants/status-codes";
 import { VerificationCodeType } from "../utils/verificationCode";
 
-import { daysFromNow } from "../utils/date";
+import { daysFromNow, minsAgo, minsFromNow } from "../utils/date";
 import { setAuthCookies } from "../utils/setCookies";
 
 import type { AuthenticatedRequest } from "../middlewares/auth.middleware";
-import { registerSchema, loginSchema } from "./auth.schema";
+import { registerSchema, loginSchema, verificationCodeSchema, emailSchema, forgotPasswordSchema } from "./auth.schema";
+import { sendMail } from "../utils/resend";
+import { resetPasswordEmailTemplate, verifyEmailTemplate } from "../utils/mailTemplates";
+import { hashPassword } from "../utils/bcrypt";
+import { clearCookies } from "../utils/clearCookies";
 
 const registerController = asyncHandler(async (req, res) => {
 	// validate the request body object
@@ -38,6 +51,12 @@ const registerController = asyncHandler(async (req, res) => {
 		type: VerificationCodeType.EmailVerification,
 		expiresAt: daysFromNow(1),
 	});
+
+	// send verification mail
+	const url = `${config.get<string>("origin")}/auth/verify/email/${verificationCode._id}`;
+	const { data, error } = await sendMail({ to: newUser.email, ...verifyEmailTemplate(url) });
+
+	if (error) throw new ApiError(INTERNAL_SERVER_ERROR, "Failed to send a mail");
 
 	//create a session
 	const session = await Session.create({ userID: newUser._id, userAgent });
@@ -65,7 +84,7 @@ const loginController = asyncHandler(async (req, res) => {
 	if (!userExist) throw new ApiError(NOT_FOUND, "Invalid Email or Password");
 
 	// comapre the password
-	const checkPassword = userExist.comparedPassword(password);
+	const checkPassword = await userExist.comparedPassword(password);
 	if (!checkPassword) throw new ApiError(UNAUTHORIZED, "Invalid Email or Password");
 
 	// create a session
@@ -138,4 +157,90 @@ const refreshController = asyncHandler(async (req, res) => {
 		.json({ user, success: true, message: "Session refreshed successfull" });
 });
 
-export { registerController, loginController, logoutController, refreshController };
+const verifyUserController = asyncHandler(async (req, res) => {
+	const codeID = verificationCodeSchema.parse(req.params.code);
+
+	// get code doc
+	const verificationDoc = await VerificationCode.findOne({
+		_id: codeID,
+		type: VerificationCodeType.EmailVerification,
+		expiresAt: { $gt: new Date() },
+	});
+	if (!verificationDoc) throw new ApiError(NOT_FOUND, "Invalid or Expired verification code");
+
+	// search the usser
+	const user = await User.findByIdAndUpdate(verificationDoc.userID, { verified: true }, { new: true });
+	if (!user) throw new ApiError(INTERNAL_SERVER_ERROR, "Failed to verify user");
+
+	// delete the doc
+	await verificationDoc.deleteOne();
+
+	res.status(OK).json({ success: true, message: "Email Verified" });
+});
+
+const sendPasswordForgotEmailController = asyncHandler(async (req, res) => {
+	const email = emailSchema.parse(req.body.email);
+
+	// find user
+	const user = await User.findOne({ email });
+	if (!user) throw new ApiError(NOT_FOUND, `Invalid email`);
+
+	// email rate limit
+	const count = await VerificationCode.countDocuments({
+		userID: user._id,
+		type: VerificationCodeType.PasswordReset,
+		createdAt: { $gt: minsAgo(10) },
+	});
+
+	if (count >= 1) throw new ApiError(TOO_MANY_REQUESTS, "Too many request");
+
+	//create verification code
+	const code = await VerificationCode.create({
+		userID: user._id,
+		type: VerificationCodeType.PasswordReset,
+		expiresAt: minsFromNow(60),
+	});
+	// send mail
+	const url = `${config.get<string>("origin")}/password/reset?code=${code._id}&exp=${minsFromNow(60).getTime()}`;
+	const { data, error } = await sendMail({ to: user.email, ...resetPasswordEmailTemplate(url) });
+	if (error) throw new ApiError(INTERNAL_SERVER_ERROR, "Failed to send a mail");
+
+	res.status(OK).json({ message: "check your mail to reset password", success: true });
+});
+
+const passwordResetController = asyncHandler(async (req, res) => {
+	const { password, verificationCode: codeID } = forgotPasswordSchema.parse(req.body);
+
+	const validCode = await VerificationCode.findOne({
+		_id: codeID,
+		type: VerificationCodeType.PasswordReset,
+		expiresAt: { $gt: new Date() },
+	});
+
+	if (!validCode) throw new ApiError(NOT_FOUND, "Invalid or Expired code");
+
+	const updatedUser = await User.findOneAndUpdate(
+		{ _id: validCode.userID },
+		{ password: await hashPassword(password) },
+		{ new: true },
+	);
+
+	if (!updatedUser) throw new ApiError(INTERNAL_SERVER_ERROR, "Failed to update User");
+
+	await validCode.deleteOne();
+	await Session.deleteMany({ userID: updatedUser._id });
+
+	clearCookies(req, res);
+
+	res.status(OK).json({ message: "password changed successfully", success: true });
+});
+
+export {
+	registerController,
+	loginController,
+	logoutController,
+	refreshController,
+	verifyUserController,
+	sendPasswordForgotEmailController,
+	passwordResetController,
+};
